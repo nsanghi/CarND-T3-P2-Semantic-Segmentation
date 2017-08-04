@@ -4,6 +4,7 @@ import helper
 import warnings
 from distutils.version import LooseVersion
 import project_tests as tests
+import numpy as np
 
 
 # Check TensorFlow Version
@@ -56,44 +57,38 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
     """
     # TODO: Implement function
     # the decoder part i..e convolutional part of the layer should not adjust weights
-    layer3_frozen = tf.stop_gradient(vgg_layer3_out)
-    layer4_frozen = tf.stop_gradient(vgg_layer4_out)
-    layer7_frozen = tf.stop_gradient(vgg_layer7_out)
-    skip_scale_factor = 0.1
+    # the result was better when vgg_layers were not frozen - so removed the stop_gradient
+    # in my final run
+    #layer3_frozen = tf.stop_gradient(vgg_layer3_out)
+    #layer4_frozen = tf.stop_gradient(vgg_layer4_out)
+    #layer7_frozen = tf.stop_gradient(vgg_layer7_out)
+    #skip_scale_factor = 0.1
+    layer3_frozen = vgg_layer3_out
+    layer4_frozen = vgg_layer4_out
+    layer7_frozen = vgg_layer7_out
+    skip_scale_factor = 1.0
 
-    layer7_up2 = tf.layers.conv2d_transpose(layer7_frozen,
-                                             num_classes,
-                                             kernel_size=(4,4),
-                                             strides=(2,2),
-                                             activation=tf.nn.relu)
+    layer7_conv = tf.layers.conv2d(layer7_frozen, num_classes, kernel_size=(1,1), strides=(1,1),
+                                   kernel_initializer=tf.random_normal_initializer(stddev=0.01))
 
-    layer4_skip = tf.layers.conv2d(layer4_frozen,
-                                   num_classes,
-                                   kernel_size=(1,1),
-                                   strides=(1,1),
-                                   activation=None)
+    layer7_up2 = tf.layers.conv2d_transpose(layer7_conv, num_classes, kernel_size=(4,4), strides=(2,2),
+                                             padding='SAME',kernel_initializer=tf.random_normal_initializer(stddev=0.01))
+
+    layer4_skip = tf.layers.conv2d(layer4_frozen, num_classes, kernel_size=(1,1), strides=(1,1),
+                                   kernel_initializer=tf.random_normal_initializer(stddev=0.01))
 
     deconv_layer1 = tf.add(layer7_up2, skip_scale_factor*layer4_skip)
 
-    deconv_layer1_up = tf.layers.conv2d_transpose(deconv_layer1,
-                                             num_classes,
-                                             kernel_size=(4,4),
-                                             strides=(2,2),
-                                             activation=tf.nn.relu)
+    deconv_layer1_up = tf.layers.conv2d_transpose(deconv_layer1, num_classes, kernel_size=(4,4), strides=(2,2),
+                                                  padding='SAME', kernel_initializer=tf.random_normal_initializer(stddev=0.01))
 
-    layer3_skip = tf.layers.conv2d(layer3_frozen,
-                                   num_classes,
-                                   kernel_size=(1,1),
-                                   strides=(1,1),
-                                   activation=None)
+    layer3_skip = tf.layers.conv2d(layer3_frozen, num_classes, kernel_size=(1,1), strides=(1,1),
+                                   kernel_initializer=tf.random_normal_initializer(stddev=0.01))
 
     deconv_layer2 = tf.add(deconv_layer1_up, skip_scale_factor*layer3_skip)
 
-    deconv_layer2_up = tf.layers.conv2d_transpose(deconv_layer2,
-                                             num_classes,
-                                             kernel_size=(16,16),
-                                             strides=(8,8),
-                                             activation=tf.nn.relu)
+    deconv_layer2_up = tf.layers.conv2d_transpose(deconv_layer2, num_classes, kernel_size=(16,16), strides=(8,8),
+                                             padding='SAME', kernel_initializer=tf.random_normal_initializer(stddev=0.01))
 
 
     return deconv_layer2_up
@@ -112,15 +107,13 @@ def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
     """
     # TODO: Implement function
     logits = tf.reshape(nn_last_layer, shape=[-1, num_classes])
-    correct_label_reshaped = tf.reshape(correct_label, shape=[-1, num_classes])
+    labels = tf.reshape(correct_label, shape=[-1, num_classes])
 
-    cross_entropy_loss = tf.nn.softmax_cross_entropy_with_logits(
+    cross_entropy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
                             logits=logits,
-                            labels=correct_label_reshaped)
+                            labels=labels))
 
-    cost = tf.reduce_mean(cross_entropy_loss)
-
-    optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
+    optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cross_entropy_loss)
 
     return logits, optimizer, cross_entropy_loss
 
@@ -144,37 +137,16 @@ def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_l
     """
     # TODO: Implement function
 
-    lrn_rate = 0.01
+    lrn_rate = 0.001
     keep_prob_val = 0.5
 
     for epoch in range(epochs):
-        print('Starting Epoch {}/{}...'.format(epoch+1, epochs))
-
-        batch_no = 0
         for images,labels in get_batches_fn(batch_size):
+            _,loss = sess.run([train_op, cross_entropy_loss],
+                              feed_dict= { input_image: images, correct_label: labels, keep_prob: keep_prob_val,
+                                            learning_rate: lrn_rate})
 
-            batch_no += 1
-
-            feed_dict = {
-                input_image: images,
-                correct_label: labels,
-                keep_prob: keep_prob_val,
-                learning_rate: lrn_rate
-            }
-
-            sess.run(train_op, feed_dict=feed_dict)
-
-        if batch_no % 10 == 0:
-            feed_dict = {
-                input_image: images,
-                correct_label: labels,
-                keep_prob: 1.0,
-                learning_rate: lrn_rate
-            }
-
-            loss = sess.run(cross_entropy_loss, feed_dict=feed_dict)
-            mean_loss = tf.reduce_mean(loss)
-            print("Training Loss:{}".format(mean_loss))
+            print('Epoch:{}/{}'.format(epoch+1, epochs), "Training Loss:{}".format(loss))
 
 tests.test_train_nn(train_nn)
 
@@ -194,8 +166,8 @@ def run():
     #  https://www.cityscapes-dataset.com/
 
     # tunable paramters
-    epochs = 1
-    batch_size = 1
+    epochs = 30
+    batch_size = 8
 
     # palceholders
     correct_label = tf.placeholder(tf.float32, [None, image_shape[0], image_shape[1], num_classes])
